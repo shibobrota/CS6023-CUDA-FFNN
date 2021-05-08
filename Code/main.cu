@@ -92,7 +92,7 @@ struct prg
 	thrust::uniform_real_distribution<double> dist;
 
 	__host__ __device__
-	prg(unsigned seed, double _a = 0.0, double _b = 1.0) : a(_a), b(_b)
+	prg(unsigned seed, double _a = -1.0, double _b = 1.0) : a(_a), b(_b)
 	{
 		this->rng = thrust::default_random_engine(seed);
 		this->dist = thrust::uniform_real_distribution<double>(a, b);
@@ -174,58 +174,50 @@ public:
 
 	/* Activation Layer Nodes */
 	thrust::device_vector<double> d_H;
-	thrust::host_vector<double> h_H;
 
 	/* Pre-Activation Layer Nodes */
 	thrust::device_vector<double> d_A;
 
-	void applyActivation()
-	{
-
-		switch (activation)
-		{
-		case SOFTMAX:
-		{
-			double sum = thrust::transform_reduce(d_A.begin(), d_A.end(), Exp(), 0.0, thrust::plus<float>());
-			thrust::transform(d_A.begin(), d_A.end(), d_H.begin(), Softmax(sum));
-			break;
-		}
-		case RELU:
-		{
-			thrust::transform(d_A.begin(), d_A.end(), d_H.begin(), ReLU());
-			break;
-		}
-		case TANH:
-		{
-			thrust::transform(d_A.begin(), d_A.end(), d_H.begin(), TanH());
-			break;
-		}
-		case SIGMOID:
-		{
-			thrust::transform(d_A.begin(), d_A.end(), d_H.begin(), Sigmoid());
-		}
-		default:
-		{
-			printf("Undefined Activation!");
-		}
-		}
-	}
 
 	Layer(LayerType _type, unsigned _size, ActivationType _activation)
 	{
 		size = _size;
 		activation = _activation;
+		std::cout << activation;
 		type = _type;
 
-		if (type == LayerType::INPUT)
-		{
-			h_H = thrust::host_vector<double>(size);
-		}
-		else
+		if (type != LayerType::INPUT)
 		{
 			d_A = thrust::device_vector<double>(size);
 		}
 		d_H = thrust::device_vector<double>(size);
+	}
+
+	void applyActivation()
+	{
+		switch (activation)
+		{
+		case ActivationType::SOFTMAX: {
+			double sum = thrust::transform_reduce(d_A.begin(), d_A.end(), Exp(), 0.0, thrust::plus<float>());
+			thrust::transform(d_A.begin(), d_A.end(), d_H.begin(), Softmax(sum));
+			break;
+		}
+		case ActivationType::RELU: {
+			thrust::transform(d_A.begin(), d_A.end(), d_H.begin(), ReLU());
+			break;
+		}
+		case ActivationType::TANH: {
+			thrust::transform(d_A.begin(), d_A.end(), d_H.begin(), TanH());
+			break;
+		}
+		case ActivationType::SIGMOID: {
+			thrust::transform(d_A.begin(), d_A.end(), d_H.begin(), Sigmoid());
+			break;
+		}
+		default: {
+			printf("\nUndefined Activation!\n");
+		}
+		}
 	}
 };
 
@@ -362,6 +354,10 @@ public:
 		h_val = _val;
 		epochs = _epochs;
 		batchSize = _batchSize;
+
+		layers[0].d_H = h_training[0];
+
+		forwardProp();
 	}
 
 	void matMul(thrust::device_vector<double> A, thrust::device_vector<double> B, thrust::device_vector<double> &C, 
@@ -381,33 +377,44 @@ public:
 	}
 
 	void forwardProp() {
-		//
+		for (unsigned i = 1; i < layers.size(); i++) {
+			thrust::device_vector<double> res(layers[i].size);
+			matMul(W[i].data, layers[i-1].d_H, res, W[i].row, W[i].col, 1);
+			matAdd(res, B[i], layers[i].d_A, res.size(), 1);
+			layers[i].applyActivation();
+
+			//std::cout << std::endl << "Pre Activation layer " << std::endl;
+			//thrust::copy(layers[i].d_A.begin(), layers[i].d_A.end(), std::ostream_iterator<double>(std::cout, " "));
+			//std::cout << std::endl << "Activation layer " << std::endl;
+			//thrust::copy(layers[i].d_H.begin(), layers[i].d_H.end(), std::ostream_iterator<double>(std::cout, " "));
+		}
+	}
+
+	void backProp() {
+
 	}
 };
 
 int main()
 {
-	unsigned m = 10, n = 20, r = 5;
-	thrust::device_vector<double > A(m * n);
-	thrust::device_vector<double > B(m * n);
-	thrust::device_vector<double > C(m * n);
+	unsigned inputSize = 10, hiddenSize = 5, outputSize = 2;
+	thrust::host_vector<double > A(inputSize);
 
-	thrust::fill(A.begin(), A.end(), 1.8);
-	thrust::fill(B.begin(), B.end(), 5.2);
-
-	thrust::copy(A.begin(), A.end(), std::ostream_iterator<double>(std::cout, " "));
-	std::cout << std::endl;
-	thrust::copy(B.begin(), B.end(), std::ostream_iterator<double>(std::cout, " "));
-	std::cout << std::endl;
+	thrust::fill(A.begin(), A.end(), 0.5);
 
 	Model model;
 
-	//model.matMul(A, B, C, m, n, r);
-	model.matAdd(A, B, C, m, n);
-	cudaDeviceSynchronize();
+	model.add(Layer(LayerType::INPUT, inputSize, ActivationType::NONE));
+	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
+	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
+	model.add(Layer(LayerType::OUTPUT, outputSize, ActivationType::SOFTMAX));
 
-	thrust::copy(C.begin(), C.end(), std::ostream_iterator<double>(std::cout, " "));
+	model.compile(OptimizerType::BATCH_GD, InitializationType::RANDOM, 0.001);
 
-	std::cout << "No Error!!";
+	std::vector< thrust::host_vector<double >> dataset;
+	dataset.push_back(A);
+
+	model.fit(dataset, dataset, 1, 1);
+
 	return 0;
 }
