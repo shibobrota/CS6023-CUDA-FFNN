@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <time.h>
+#include <chrono>
 
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
@@ -49,18 +50,19 @@ enum InitializationType
 
 struct matrixMult
 {
-	double* A, * B;
+	double *A, *B;
 	int m, n, r;
-	
-	matrixMult(double* _A, double* _B, unsigned _m, unsigned _n, unsigned _r) : A(_A), B(_B), m(_m), n(_n), r(_r) {};
 
-	__host__ __device__
-	double operator()(unsigned idx) {
+	matrixMult(double *_A, double *_B, unsigned _m, unsigned _n, unsigned _r) : A(_A), B(_B), m(_m), n(_n), r(_r){};
+
+	__host__ __device__ double operator()(unsigned idx)
+	{
 		unsigned i = idx / r;
 		unsigned j = idx % r;
 		double sum = 0.0;
 
-		for (unsigned k = 0; k < n; k++) {
+		for (unsigned k = 0; k < n; k++)
+		{
 			sum += A[i * r + k] * B[k * r + j];
 		}
 		return sum;
@@ -72,10 +74,9 @@ struct transposeIndex
 	unsigned m, n;
 
 	__host__ __device__
-		transposeIndex(unsigned _m, unsigned _n) : m(_m), n(_n) {}
+	transposeIndex(unsigned _m, unsigned _n) : m(_m), n(_n) {}
 
-	__host__ __device__
-	unsigned operator()(unsigned linear_index)
+	__host__ __device__ unsigned operator()(unsigned linear_index)
 	{
 		unsigned i = linear_index / n;
 		unsigned j = linear_index % n;
@@ -144,7 +145,7 @@ struct GradTanH
 {
 	__host__ __device__ double operator()(double data)
 	{
-		return (1-pow(tanh(data), 2));
+		return (1 - pow(tanh(data), 2));
 	}
 };
 
@@ -161,7 +162,7 @@ struct GradSigmoid
 	__host__ __device__ double operator()(double data)
 	{
 		double sigX = (1.0 / (1 + exp(-data)));
-		return sigX*(1-sigX);
+		return sigX * (1 - sigX);
 	}
 };
 
@@ -177,12 +178,14 @@ struct Softmax
 	}
 };
 
-class Matrix {
+class Matrix
+{
 public:
 	unsigned row, col;
 	thrust::device_vector<double> data;
 
-	Matrix(unsigned _row, unsigned _col) {
+	Matrix(unsigned _row, unsigned _col)
+	{
 		row = _row;
 		col = _col;
 
@@ -204,7 +207,6 @@ public:
 	/* Pre-Activation Layer Nodes */
 	thrust::device_vector<double> A;
 
-
 	Layer(LayerType _type, unsigned _size, ActivationType _activation)
 	{
 		size = _size;
@@ -223,40 +225,50 @@ public:
 	{
 		switch (activation)
 		{
-		case ActivationType::SOFTMAX: {
+		case ActivationType::SOFTMAX:
+		{
 			double sum = thrust::transform_reduce(A.begin(), A.end(), Exp(), 0.0, thrust::plus<float>());
 			thrust::transform(A.begin(), A.end(), H.begin(), Softmax(sum));
 			break;
 		}
-		case ActivationType::RELU: {
+		case ActivationType::RELU:
+		{
 			thrust::transform(A.begin(), A.end(), H.begin(), ReLU());
 			break;
 		}
-		case ActivationType::TANH: {
+		case ActivationType::TANH:
+		{
 			thrust::transform(A.begin(), A.end(), H.begin(), TanH());
 			break;
 		}
-		case ActivationType::SIGMOID: {
+		case ActivationType::SIGMOID:
+		{
 			thrust::transform(A.begin(), A.end(), H.begin(), Sigmoid());
 			break;
 		}
-		default: {
+		default:
+		{
 			printf("\nUndefined Activation!\n");
 		}
 		}
 	}
 
-	void getGradA(thrust::device_vector<double>& t) {
-		switch (activation) {
-		case ActivationType::RELU: {
+	void getGradA(thrust::device_vector<double> &t)
+	{
+		switch (activation)
+		{
+		case ActivationType::RELU:
+		{
 			thrust::transform(A.begin(), A.end(), t.begin(), GradReLU());
 			break;
 		}
-		case ActivationType::SIGMOID: {
+		case ActivationType::SIGMOID:
+		{
 			thrust::transform(A.begin(), A.end(), t.begin(), GradSigmoid());
 			break;
 		}
-		case ActivationType::TANH: {
+		case ActivationType::TANH:
+		{
 			thrust::transform(A.begin(), A.end(), t.begin(), GradTanH());
 			break;
 		}
@@ -343,7 +355,7 @@ public:
 
 			if (initializationType == InitializationType::RANDOM)
 			{
-				srand(time(0));
+				srand(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
 				thrust::counting_iterator<unsigned> iterator(0);
 				thrust::transform(iterator, iterator + tempWi.data.size(), tempWi.data.begin(), prg(rand()));
 			}
@@ -356,6 +368,14 @@ public:
 
 			dW.push_back(temp_dWi);
 			W.push_back(tempWi);
+
+			std::cout << std::endl
+					  << "dW: \n";
+			thrust::copy(temp_dWi.data.begin(), temp_dWi.data.end(), std::ostream_iterator<double>(std::cout, " "));
+			std::cout << std::endl
+					  << "W: \n";
+			thrust::copy(tempWi.data.begin(), tempWi.data.end(), std::ostream_iterator<double>(std::cout, " "));
+			std::cout << "\n";
 		}
 	}
 
@@ -365,14 +385,14 @@ public:
 		B.push_back(thrust::device_vector<double>());
 		dB.push_back(thrust::device_vector<double>());
 
-		for (int i = 1; i < layers.size(); i++)
+		for (unsigned i = 1; i < layers.size(); i++)
 		{
 			thrust::device_vector<double> tempBi(layers.at(i).size);
 			thrust::device_vector<double> temp_dBi(layers.at(i).size);
 
 			if (initializationType == InitializationType::RANDOM)
 			{
-				srand(time(0));
+				srand(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
 				thrust::counting_iterator<unsigned> iterator(0);
 				thrust::transform(iterator, iterator + tempBi.size(), tempBi.begin(), prg(rand()));
 			}
@@ -385,6 +405,14 @@ public:
 
 			B.push_back(tempBi);
 			dB.push_back(temp_dBi);
+
+			std::cout << std::endl
+					  << "dB: \n";
+			thrust::copy(temp_dBi.begin(), temp_dBi.end(), std::ostream_iterator<double>(std::cout, " "));
+			std::cout << std::endl
+					  << "W: \n";
+			thrust::copy(tempBi.begin(), tempBi.end(), std::ostream_iterator<double>(std::cout, " "));
+			std::cout << "\n";
 		}
 	}
 
@@ -415,67 +443,104 @@ public:
 		layers[0].H = h_training[0];
 
 		forwardProp();
+		cudaDeviceSynchronize();
 		backProp();
 	}
 
-	void matMul(thrust::device_vector<double> A, thrust::device_vector<double> B, thrust::device_vector<double> &C, 
-			unsigned m, unsigned n, unsigned r) {
+	void matMul(thrust::device_vector<double> A, thrust::device_vector<double> B, thrust::device_vector<double> &C,
+				unsigned m, unsigned n, unsigned r)
+	{
 
 		thrust::counting_iterator<unsigned> iter(0);
-		thrust::transform(iter, iter+(m*r), C.begin(), matrixMult(thrust::raw_pointer_cast(A.data()), thrust::raw_pointer_cast(B.data()), m, n, r));
+		thrust::transform(iter, iter + (m * r), C.begin(), matrixMult(thrust::raw_pointer_cast(A.data()), thrust::raw_pointer_cast(B.data()), m, n, r));
 	}
 
-	void matTrans(thrust::device_vector<double> A, thrust::device_vector<double>& B, unsigned m, unsigned n) {
+	void matTrans(thrust::device_vector<double> A, thrust::device_vector<double> &B, unsigned m, unsigned n)
+	{
 		thrust::counting_iterator<size_t> iter(0);
 		thrust::gather(thrust::make_transform_iterator(iter, transposeIndex(n, m)), thrust::make_transform_iterator(iter, transposeIndex(n, m)) + B.size(), A.begin(), B.begin());
 	}
 
-	void forwardProp() {
-		for (unsigned i = 1; i < layers.size(); i++) {
+	void forwardProp()
+	{
+		for (unsigned i = 1; i < layers.size(); i++)
+		{
 			thrust::device_vector<double> res(layers[i].size);
-			matMul(W[i].data, layers[i-1].H, res, W[i].row, W[i].col, 1);
+
+			matMul(W[i].data, layers[i - 1].H, res, W[i].row, W[i].col, 1);
+			thrust::transform(res.begin(), res.end(), B[i].begin(), layers[i].A.begin(), thrust::plus<double>());
 			layers[i].applyActivation();
 
-			//std::cout << std::endl << "Pre Activation layer " << std::endl;
-			//thrust::copy(layers[i].d_A.begin(), layers[i].d_A.end(), std::ostream_iterator<double>(std::cout, " "));
-			//std::cout << std::endl << "Activation layer " << std::endl;
-			//thrust::copy(layers[i].d_H.begin(), layers[i].d_H.end(), std::ostream_iterator<double>(std::cout, " "));
+			std::cout << std::endl
+					  << "Pre Activation layer " << i << std::endl;
+			thrust::copy(layers[i].A.begin(), layers[i].A.end(), std::ostream_iterator<double>(std::cout, " "));
+			std::cout << std::endl
+					  << "Activation layer " << i << std::endl;
+			thrust::copy(layers[i].H.begin(), layers[i].H.end(), std::ostream_iterator<double>(std::cout, " "));
+			std::cout << std::endl;
 		}
 	}
 
-	void backProp() {
+	void backProp()
+	{
 		unsigned L = layers.size() - 1;
 		thrust::device_vector<double> dA(layers[L].size);
 		thrust::device_vector<double> dH;
 		thrust::device_vector<double> temp(layers[L].size);
 
 		thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
-		unsigned position = iter - layers[0].H.begin();
+		unsigned position = iter - layers[L].H.begin();
+
+		std::cout << std::endl;
+		thrust::copy(layers[L].H.begin(), layers[L].H.end(), std::ostream_iterator<double>(std::cout, " "));
+		std::cout << std::endl
+				  << position << std::endl;
 
 		thrust::fill(temp.begin(), temp.end(), 0.0);
 		temp[position] = 1.0;
 
 		thrust::transform(layers[L].H.begin(), layers[L].H.end(), temp.begin(), dA.begin(), thrust::minus<double>());
 
+		std::cout<< "\n### BACK PROPAGATION ###\n" << std::endl
+			<< "Pre Activation layer dA: " << L << std::endl;
+		thrust::copy(dA.begin(), dA.end(), std::ostream_iterator<double>(std::cout, " "));
+		std::cout << std::endl;
+
 		//for (int i = L; i >= 1; i++) {
 		//	matMul(dA, layers[i - 1].H, dW[i].data, dA.size(), 1, layers[i - 1].H.size());
 		//	thrust::copy(dA.begin(), dA.end(), dB[i].begin());
 
+		//	std::cout << std::endl
+		//		<< "dW: " << i << std::endl;
+		//	thrust::copy(dW[i].data.begin(), dW[i].data.end(), std::ostream_iterator<double>(std::cout, " "));
+		//	std::cout << std::endl;
+		//	std::cout << "dB: " << i << std::endl;
+		//	thrust::copy(dB[i].begin(), dB[i].end(), std::ostream_iterator<double>(std::cout, " "));
+		//	std::cout << std::endl;
+
 		//	cudaDeviceSynchronize();
 
 		//	if (i > 1) {
-		//		dH = thrust::device_vector<double>(layers[L - 1].size);
+		//		dH = thrust::device_vector<double>(layers[i - 1].size);
 		//		temp = thrust::device_vector<double>(W[i].data.size());
 
 		//		matTrans(W[i].data, temp, W[i].row, W[i].col);
 		//		matMul(temp, dA, dH, W[i].col, W[i].row, 1);
 
-		//		dA = thrust::device_vector<double>(layers[L - 1].size);
-		//		temp = thrust::device_vector<double>(layers[L - 1].size);
+		//		dA = thrust::device_vector<double>(layers[i - 1].size);
+		//		temp = thrust::device_vector<double>(layers[i - 1].size);
 
 		//		layers[i - 1].getGradA(temp);
-		//		
+		//
 		//		thrust::transform(layers[i - 1].H.begin(), layers[i - 1].H.end(), temp.begin(), dA.begin(), thrust::multiplies<double>());
+
+		//		std::cout << std::endl
+		//			<< "Activation layer dH: " << i << std::endl;
+		//		thrust::copy(dH.begin(), dH.end(), std::ostream_iterator<double>(std::cout, " "));
+		//		std::cout << std::endl
+		//			<< "Pre Activation layer dA: " << i << std::endl;
+		//		thrust::copy(dA.begin(), dA.end(), std::ostream_iterator<double>(std::cout, " "));
+		//		std::cout << std::endl;
 		//	}
 		//}
 	}
@@ -484,7 +549,7 @@ public:
 int main()
 {
 	unsigned inputSize = 10, hiddenSize = 5, outputSize = 2;
-	thrust::host_vector<double > A(inputSize);
+	thrust::host_vector<double> A(inputSize);
 
 	thrust::fill(A.begin(), A.end(), 0.5);
 
@@ -497,7 +562,7 @@ int main()
 
 	model.compile(OptimizerType::BATCH_GD, InitializationType::RANDOM, 0.001);
 
-	std::vector< thrust::host_vector<double >> dataset;
+	std::vector<thrust::host_vector<double>> dataset;
 	dataset.push_back(A);
 
 	model.fit(dataset, dataset, 1, 1);
