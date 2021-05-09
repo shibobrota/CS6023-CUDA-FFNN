@@ -458,11 +458,9 @@ public:
 
 		layers[0].H = h_data[0];
 
-		for (int i = 0; i < 100; i++) {
-			forwardProp();
-			cudaDeviceSynchronize();
-			backProp();
-		}
+		//forwardProp();
+		//cudaDeviceSynchronize();
+		//backProp(0);
 	}
 
 	void matMul(thrust::device_vector<double> A, thrust::device_vector<double> B, thrust::device_vector<double> &C,
@@ -501,7 +499,7 @@ public:
 		}
 	}
 
-	void backProp()
+	void backProp(unsigned position)
 	{
 		unsigned L = layers.size() - 1;
 		thrust::device_vector<double> Y;
@@ -522,8 +520,8 @@ public:
 			}
 		}
 
-		thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
-		unsigned position = iter - layers[L].H.begin();
+		//thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
+		//unsigned position = iter - layers[L].H.begin();
 
 		if (SHOW_DEBUG_LOGS) {
 			std::cout << "\nLayer L" << std::endl;
@@ -606,6 +604,17 @@ public:
 					std::cout << std::endl;
 				}
 			}
+		}
+	}
+
+	void SGD() {
+		double accuracy = 0.0;
+		double loss = 0.0;
+
+		for (int i = 0; i < h_data.size(); i++) {
+
+
+
 		}
 	}
 };
