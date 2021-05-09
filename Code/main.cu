@@ -7,6 +7,7 @@
 #include <string>
 #include <time.h>
 #include <chrono>
+#include <fstream>
 
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
@@ -17,6 +18,9 @@
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/random.h>
 #include <thrust/extrema.h>
+
+__managed__
+static bool SHOW_DEBUG_LOGS = false;
 
 enum LayerType
 {
@@ -61,12 +65,17 @@ struct matrixMult
 		unsigned j = idx % r;
 		double sum = 0.0;
 
-		printf("idx: %d | i: %d | j: %d\n", idx, i, j);
+		if (SHOW_DEBUG_LOGS)
+		{
+			printf("idx: %d | i: %d | j: %d\n", idx, i, j);
+		}
 
 		for (unsigned k = 0; k < n; k++)
 		{
 			sum += A[i * n + k] * B[k * r + j];
-			printf("A[i * n + k = %d]: %f | B[k * r + j = %d]: %f\n", i * n + k, A[i * n + k], k * r + j, B[k * r + j]);
+			if (SHOW_DEBUG_LOGS) {
+				printf("A[i * n + k = %d]: %f | B[k * r + j = %d]: %f\n", i * n + k, A[i * n + k], k * r + j, B[k * r + j]);
+			}
 		}
 		return sum;
 	}
@@ -214,7 +223,7 @@ public:
 	{
 		size = _size;
 		activation = _activation;
-		std::cout << activation;
+
 		type = _type;
 
 		if (type != LayerType::INPUT)
@@ -299,8 +308,8 @@ public:
 	double learningRate;
 	unsigned epochs;
 	unsigned batchSize;
-	std::vector<thrust::host_vector<double>> h_training;
-	std::vector<thrust::host_vector<double>> h_val;
+	std::vector<thrust::host_vector<double>> h_data;
+	thrust::host_vector<double> h_labels;
 	std::vector<Layer> layers;
 	std::vector<Matrix> W;
 	std::vector<Matrix> dW;
@@ -372,13 +381,15 @@ public:
 			dW.push_back(temp_dWi);
 			W.push_back(tempWi);
 
-			std::cout << std::endl
-					  << "dW: \n";
-			thrust::copy(temp_dWi.data.begin(), temp_dWi.data.end(), std::ostream_iterator<double>(std::cout, " "));
-			std::cout << std::endl
-					  << "W: \n";
-			thrust::copy(tempWi.data.begin(), tempWi.data.end(), std::ostream_iterator<double>(std::cout, " "));
-			std::cout << "\n";
+			if (SHOW_DEBUG_LOGS) {
+				std::cout << std::endl
+					<< "dW: \n";
+				thrust::copy(temp_dWi.data.begin(), temp_dWi.data.end(), std::ostream_iterator<double>(std::cout, " "));
+				std::cout << std::endl
+					<< "W: \n";
+				thrust::copy(tempWi.data.begin(), tempWi.data.end(), std::ostream_iterator<double>(std::cout, " "));
+				std::cout << "\n";
+			}
 		}
 	}
 
@@ -409,13 +420,15 @@ public:
 			B.push_back(tempBi);
 			dB.push_back(temp_dBi);
 
-			std::cout << std::endl
-					  << "dB: \n";
-			thrust::copy(temp_dBi.begin(), temp_dBi.end(), std::ostream_iterator<double>(std::cout, " "));
-			std::cout << std::endl
-					  << "W: \n";
-			thrust::copy(tempBi.begin(), tempBi.end(), std::ostream_iterator<double>(std::cout, " "));
-			std::cout << "\n";
+			if (SHOW_DEBUG_LOGS) {
+				std::cout << std::endl
+					<< "dB: \n";
+				thrust::copy(temp_dBi.begin(), temp_dBi.end(), std::ostream_iterator<double>(std::cout, " "));
+				std::cout << std::endl
+					<< "W: \n";
+				thrust::copy(tempBi.begin(), tempBi.end(), std::ostream_iterator<double>(std::cout, " "));
+				std::cout << "\n";
+			}
 		}
 	}
 
@@ -436,18 +449,20 @@ public:
 		initBias();
 	}
 
-	void fit(std::vector<thrust::host_vector<double>> _training, std::vector<thrust::host_vector<double>> _val, unsigned _epochs, unsigned _batchSize)
+	void fit(std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> _dataset, unsigned _epochs, unsigned _batchSize)
 	{
-		h_training = _training;
-		h_val = _val;
+		h_data = _dataset.first;
+		h_labels = _dataset.second;
 		epochs = _epochs;
 		batchSize = _batchSize;
 
-		layers[0].H = h_training[0];
+		layers[0].H = h_data[0];
 
-		forwardProp();
-		cudaDeviceSynchronize();
-		backProp();
+		for (int i = 0; i < 100; i++) {
+			forwardProp();
+			cudaDeviceSynchronize();
+			backProp();
+		}
 	}
 
 	void matMul(thrust::device_vector<double> A, thrust::device_vector<double> B, thrust::device_vector<double> &C,
@@ -474,13 +489,15 @@ public:
 			thrust::transform(res.begin(), res.end(), B[i].begin(), layers[i].A.begin(), thrust::plus<double>());
 			layers[i].applyActivation();
 
-			std::cout << std::endl
-					  << "Pre Activation layer " << i << std::endl;
-			thrust::copy(layers[i].A.begin(), layers[i].A.end(), std::ostream_iterator<double>(std::cout, " "));
-			std::cout << std::endl
-					  << "Activation layer " << i << std::endl;
-			thrust::copy(layers[i].H.begin(), layers[i].H.end(), std::ostream_iterator<double>(std::cout, " "));
-			std::cout << std::endl;
+			if (SHOW_DEBUG_LOGS) {
+				std::cout << std::endl
+					<< "Pre Activation layer " << i << std::endl;
+				thrust::copy(layers[i].A.begin(), layers[i].A.end(), std::ostream_iterator<double>(std::cout, " "));
+				std::cout << std::endl
+					<< "Activation layer " << i << std::endl;
+				thrust::copy(layers[i].H.begin(), layers[i].H.end(), std::ostream_iterator<double>(std::cout, " "));
+				std::cout << std::endl;
+			}
 		}
 	}
 
@@ -508,10 +525,12 @@ public:
 		thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
 		unsigned position = iter - layers[L].H.begin();
 
-		std::cout << "\nLayer L" << std::endl;
-		thrust::copy(layers[L].H.begin(), layers[L].H.end(), std::ostream_iterator<double>(std::cout, " "));
-		std::cout << std::endl
-				  << "Pos: " << position << std::endl;
+		if (SHOW_DEBUG_LOGS) {
+			std::cout << "\nLayer L" << std::endl;
+			thrust::copy(layers[L].H.begin(), layers[L].H.end(), std::ostream_iterator<double>(std::cout, " "));
+			std::cout << std::endl
+				<< "Pos: " << position << std::endl;
+		}
 
 		Y = thrust::device_vector<double>(layers[L].size);
 
@@ -521,41 +540,47 @@ public:
 
 		thrust::transform(layers[L].H.begin(), layers[L].H.end(), Y.begin(), dA[L].begin(), thrust::minus<double>());
 
-		std::cout << "\n### BACK PROPAGATION ###\n"
-				  << std::endl
-				  << "Y" << std::endl;
-		thrust::copy(Y.begin(), Y.end(), std::ostream_iterator<double>(std::cout, " "));
-		std::cout << std::endl
-				  << "dA[L]" << std::endl;
-		thrust::copy(dA[L].begin(), dA[L].end(), std::ostream_iterator<double>(std::cout, " "));
-		std::cout << std::endl;
+		if (SHOW_DEBUG_LOGS) {
+			std::cout << "\n### BACK PROPAGATION ###\n"
+				<< std::endl
+				<< "Y" << std::endl;
+			thrust::copy(Y.begin(), Y.end(), std::ostream_iterator<double>(std::cout, " "));
+			std::cout << std::endl
+				<< "dA[L]" << std::endl;
+			thrust::copy(dA[L].begin(), dA[L].end(), std::ostream_iterator<double>(std::cout, " "));
+			std::cout << std::endl;
+		}
 
 		for (int i = L; i >= 1; i--)
 		{
-			//==========================================================================================
-			std::cout << std::endl
-				<< "dA[" << i <<"]: " << std::endl;
-			thrust::copy(dA[i].begin(), dA[i].end(), std::ostream_iterator<double>(std::cout, " "));
-			std::cout << std::endl;
-			std::cout << "layers[" << i-1 <<"].H: "<< std::endl;
-			thrust::copy(layers[i - 1].H.begin(), layers[i - 1].H.end(), std::ostream_iterator<double>(std::cout, " "));
-			std::cout << std::endl;
-			//==========================================================================================
+			if (SHOW_DEBUG_LOGS) {
+				//==========================================================================================
+				std::cout << std::endl
+					<< "dA[" << i << "]: " << std::endl;
+				thrust::copy(dA[i].begin(), dA[i].end(), std::ostream_iterator<double>(std::cout, " "));
+				std::cout << std::endl;
+				std::cout << "layers[" << i - 1 << "].H: " << std::endl;
+				thrust::copy(layers[i - 1].H.begin(), layers[i - 1].H.end(), std::ostream_iterator<double>(std::cout, " "));
+				std::cout << std::endl;
+				//==========================================================================================
+			}
 
 
 			matMul(dA[i], layers[i - 1].H, dW[i].data, dA[i].size(), 1, layers[i - 1].H.size());
 			thrust::copy(dA[i].begin(), dA[i].end(), dB[i].begin());
 
 
-			//==========================================================================================
-			std::cout << std::endl
-					  << "dW: " << i << std::endl;
-			thrust::copy(dW[i].data.begin(), dW[i].data.end(), std::ostream_iterator<double>(std::cout, " "));
-			std::cout << std::endl;
-			std::cout << "dB: " << i << std::endl;
-			thrust::copy(dB[i].begin(), dB[i].end(), std::ostream_iterator<double>(std::cout, " "));
-			std::cout << std::endl;
-			//==========================================================================================
+			if (SHOW_DEBUG_LOGS) {
+				//==========================================================================================
+				std::cout << std::endl
+					<< "dW: " << i << std::endl;
+				thrust::copy(dW[i].data.begin(), dW[i].data.end(), std::ostream_iterator<double>(std::cout, " "));
+				std::cout << std::endl;
+				std::cout << "dB: " << i << std::endl;
+				thrust::copy(dB[i].begin(), dB[i].end(), std::ostream_iterator<double>(std::cout, " "));
+				std::cout << std::endl;
+				//==========================================================================================
+			}
 
 			cudaDeviceSynchronize();
 
@@ -571,21 +596,71 @@ public:
 
 				thrust::transform(layers[i - 1].H.begin(), layers[i - 1].H.end(), gradA.begin(), dA[i-1].begin(), thrust::multiplies<double>());
 
-				std::cout << std::endl
-						  << "Activation layer dH: " << i-1 << std::endl;
-				thrust::copy(dH[i-1].begin(), dH[i - 1].end(), std::ostream_iterator<double>(std::cout, " "));
-				std::cout << std::endl
-						  << "Pre Activation layer dA: " << i-1 << std::endl;
-				thrust::copy(dA[i - 1].begin(), dA[i - 1].end(), std::ostream_iterator<double>(std::cout, " "));
-				std::cout << std::endl;
+				if (SHOW_DEBUG_LOGS) {
+					std::cout << std::endl
+						<< "Activation layer dH: " << i - 1 << std::endl;
+					thrust::copy(dH[i - 1].begin(), dH[i - 1].end(), std::ostream_iterator<double>(std::cout, " "));
+					std::cout << std::endl
+						<< "Pre Activation layer dA: " << i - 1 << std::endl;
+					thrust::copy(dA[i - 1].begin(), dA[i - 1].end(), std::ostream_iterator<double>(std::cout, " "));
+					std::cout << std::endl;
+				}
 			}
 		}
 	}
 };
 
+std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> readDataSet(std::string path) {
+
+	std::cout << "Reading Dataset: " << path << std::endl;
+
+	std::vector<thrust::host_vector<double>> dataset;
+	std::ifstream fin;
+	fin.open(path);
+
+	std::string num, temp;
+	thrust::host_vector<int> host_labels;
+
+	while (fin >> temp) {
+
+		std::cout << ".";
+
+		//To break
+		std::stringstream s(temp);
+
+		thrust::host_vector<double> row;
+		unsigned i = 0;
+		//Read col
+		while (getline(s, num, ',')) {
+			if (i == 0) {
+				host_labels.push_back(std::stoi(num));
+			}
+			else {
+				row.push_back(stod(num)/(double)255);
+			}
+			i++;
+		}
+
+		if (SHOW_DEBUG_LOGS) {
+			std::cout << std::endl;
+			thrust::copy(row.begin(), row.end(), std::ostream_iterator<double>(std::cout, " "));
+			std::cout << std::endl;
+		}
+
+		thrust::device_vector<double> dvec = row;
+		dataset.push_back(dvec);
+	}
+
+	std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> ret = std::make_pair(dataset, host_labels);
+
+	std::cout << std::endl << "Dataset read!" << std::endl;
+
+	return ret;
+}
+
 int main()
 {
-	unsigned inputSize = 10, hiddenSize = 5, outputSize = 2;
+	unsigned inputSize = 100, hiddenSize = 50, outputSize = 10;
 	thrust::host_vector<double> A(inputSize);
 
 	thrust::fill(A.begin(), A.end(), 0.021);
@@ -595,14 +670,23 @@ int main()
 	model.add(Layer(LayerType::INPUT, inputSize, ActivationType::NONE));
 	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
 	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
+	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
+	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
+	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
+	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
+	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
+	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
+	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
+	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
 	model.add(Layer(LayerType::OUTPUT, outputSize, ActivationType::SOFTMAX));
 
 	model.compile(OptimizerType::BATCH_GD, InitializationType::RANDOM, 0.001);
 
-	std::vector<thrust::host_vector<double>> dataset;
-	dataset.push_back(A);
+	thrust::host_vector<int> labels;
 
-	model.fit(dataset, dataset, 1, 1);
+	std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> dataset = readDataSet("mnist_test.csv");
+
+	model.fit(dataset, 1, 16);
 
 	return 0;
 }
