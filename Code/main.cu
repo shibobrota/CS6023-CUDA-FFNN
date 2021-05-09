@@ -52,6 +52,18 @@ enum InitializationType
 	ZERO
 };
 
+struct UpdateGrad
+{
+	double lr;
+
+	UpdateGrad(double _lr) : lr(_lr) {};
+
+	__host__ __device__ double operator()(const double& A, const double& B)
+	{
+		return (A - (lr * B));
+	}
+};
+
 struct matrixMult
 {
 	double *A, *B;
@@ -456,11 +468,7 @@ public:
 		epochs = _epochs;
 		batchSize = _batchSize;
 
-		layers[0].H = h_data[0];
-
-		//forwardProp();
-		//cudaDeviceSynchronize();
-		//backProp(0);
+		sgd();
 	}
 
 	void matMul(thrust::device_vector<double> A, thrust::device_vector<double> B, thrust::device_vector<double> &C,
@@ -520,8 +528,6 @@ public:
 			}
 		}
 
-		//thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
-		//unsigned position = iter - layers[L].H.begin();
 
 		if (SHOW_DEBUG_LOGS) {
 			std::cout << "\nLayer L" << std::endl;
@@ -607,14 +613,89 @@ public:
 		}
 	}
 
-	void SGD() {
+	void fillZeros(std::vector<Matrix> &temp_dW, std::vector<thrust::device_vector<double>> &temp_dB) {
+		//Initialize
+		for (int j = 1; j < layers.size(); j++) {
+			thrust::fill(temp_dB[j].begin(), temp_dB[j].end(), 0.0);
+			thrust::fill(temp_dW[j].data.begin(), temp_dW[j].data.end(), 0.0);
+		}
+	}
+
+	void sgd() {
+		int accuracyCount = 0;
 		double accuracy = 0.0;
 		double loss = 0.0;
 
+		std::vector<Matrix> temp_dW;
+		std::vector<thrust::device_vector<double>> temp_dB;
+
+		//Dummy 0th layer - Input layer
+		temp_dB.push_back(thrust::device_vector<double>());
+		temp_dW.push_back(Matrix(0, 0));
+
+		//Initialize
+		for (int j = 1; j < layers.size(); j++) {
+			thrust::device_vector<double> temp_dBi(layers.at(j).size);
+			Matrix temp_dWi = Matrix(layers.at(j).size, layers.at(j - 1).size);
+
+			thrust::fill(temp_dBi.begin(), temp_dBi.end(), 0.0);
+			thrust::fill(temp_dWi.data.begin(), temp_dWi.data.end(), 0.0);
+
+			temp_dB.push_back(temp_dBi);
+			temp_dW.push_back(temp_dWi);
+		}
+
 		for (int i = 0; i < h_data.size(); i++) {
 
+			//Copy data to Layer 0
+			thrust::copy(h_data[i].begin(), h_data[i].end(), layers[0].H.begin());
+
+			forwardProp();
+
+			unsigned L = layers.size() - 1;
+			thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
+			unsigned position = iter - layers[L].H.begin();
+			if (position == h_labels[i]) {
+				accuracyCount += 1;
+			}
+
+			backProp(h_labels[i]);
+
+			//Accumulate
+			for (int j = 1; j < layers.size(); j++) {
+				thrust::transform(dW[j].data.begin(), dW[j].data.end(), temp_dW[j].data.begin(), temp_dW[j].data.begin(), thrust::plus<double>());
+				thrust::transform(dB[j].begin(), dB[j].end(), temp_dB[j].begin(), temp_dB[j].begin(), thrust::plus<double>());
+			}
+
+			if ((i + 1) % batchSize == 0 || i == (h_data.size()-1)) {
+
+				accuracy = (double)accuracyCount / (double)(i + 1);
+				std::cout << "Accuracy: " << accuracy*100 << " %" << "\r";
+
+				//Update Weights
+				for (int j = 1; j < layers.size(); j++) {
+					thrust::transform(W[j].data.begin(), W[j].data.end(), temp_dW[j].data.begin(), W[j].data.begin(), UpdateGrad(learningRate));
+					thrust::transform(B[j].begin(), B[j].end(), temp_dB[j].begin(), B[j].begin(), UpdateGrad(learningRate));
+				}
+
+				fillZeros(temp_dW, temp_dB);
+			}
 
 
+			if (SHOW_DEBUG_LOGS) {
+				for (int j = 1; j < layers.size(); j++) {
+					std::cout << "W " << j << std::endl;
+					thrust::copy(W[j].data.begin(), W[j].data.end(), std::ostream_iterator<double>(std::cout, " "));
+					std::cout << std::endl << "B " << j << std::endl;
+					thrust::copy(B[j].begin(), B[j].end(), std::ostream_iterator<double>(std::cout, " "));
+				}
+				for (int j = 1; j < layers.size(); j++) {
+					std::cout << "dW " << j << std::endl;
+					thrust::copy(dW[j].data.begin(), dW[j].data.end(), std::ostream_iterator<double>(std::cout, " "));
+					std::cout << std::endl << "dB " << j << std::endl;
+					thrust::copy(dB[j].begin(), dB[j].end(), std::ostream_iterator<double>(std::cout, " "));
+				}
+			}
 		}
 	}
 };
@@ -669,31 +750,21 @@ std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> r
 
 int main()
 {
-	unsigned inputSize = 100, hiddenSize = 50, outputSize = 10;
-	thrust::host_vector<double> A(inputSize);
+	
+	thrust::host_vector<int> labels;
 
-	thrust::fill(A.begin(), A.end(), 0.021);
+	std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> dataset = readDataSet("mnist_test.csv");
+
+	unsigned inputSize = dataset.first[0].size(), hiddenSize = 100, outputSize = 10;
 
 	Model model;
 
 	model.add(Layer(LayerType::INPUT, inputSize, ActivationType::NONE));
-	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
-	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
-	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
-	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
-	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
-	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
-	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
-	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
-	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
-	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::SIGMOID));
+	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::TANH));
+	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::TANH));
 	model.add(Layer(LayerType::OUTPUT, outputSize, ActivationType::SOFTMAX));
 
 	model.compile(OptimizerType::BATCH_GD, InitializationType::RANDOM, 0.001);
-
-	thrust::host_vector<int> labels;
-
-	std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> dataset = readDataSet("mnist_test.csv");
 
 	model.fit(dataset, 1, 16);
 
