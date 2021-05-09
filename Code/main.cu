@@ -22,6 +22,10 @@
 __managed__
 static bool SHOW_DEBUG_LOGS = false;
 
+std::string TEST_DATASET_PATH = "mnist_test.csv";
+std::string TRAIN_DATASET_PATH = "mnist_train.csv";
+
+
 enum LayerType
 {
 	INPUT,
@@ -50,6 +54,18 @@ enum InitializationType
 	RANDOM,
 	XAVIER,
 	ZERO
+};
+
+struct UpdateMomentumGrad
+{
+	double lr, gamma;
+
+	UpdateMomentumGrad(double _gamma, double _lr) : lr(_lr), gamma(_gamma) {};
+
+	__host__ __device__ double operator()(const double& A, const double& B)
+	{
+		return ((gamma * A) + (lr * B));
+	}
 };
 
 struct UpdateGrad
@@ -330,7 +346,7 @@ public:
 
 	void summary()
 	{
-		printf("Model Summary\n==================================================\n");
+		printf("\nModel Summary\n==================================================\n");
 		printf("Layer (type)                    Size\n");
 		printf("--------------------------------------------------\n");
 		std::string layerType = "";
@@ -352,6 +368,24 @@ public:
 			std::cout << "Layer_" << i << " " << layerType << "                    " << layers.at(i).size << std::endl;
 		}
 		printf("==================================================\n");
+
+		std::string optType = "";
+
+		switch (optimizerType) {
+		case OptimizerType::BATCH_GD:
+			optType = "BATCH GRADIENT DESCENT";
+			break;
+		case OptimizerType::MOMENTUM_BASED_GD:
+			optType = "MOMENTUM BASED GRADIENT DESCENT";
+			break;
+		case OptimizerType::STOCHASTIC_GD:
+			optType = "STOCHASTIC GRADIENT DESCENT";
+			break;
+		}
+
+		printf("Optimizer: %s\n", optType);
+		printf("Learning Rate: %f\n", learningRate);
+		printf("--------------------------------------------------\n");
 	}
 
 	Model()
@@ -468,7 +502,46 @@ public:
 		epochs = _epochs;
 		batchSize = _batchSize;
 
-		sgd();
+		switch (optimizerType)
+		{
+		case OptimizerType::BATCH_GD:
+			batchGD();
+			break;
+		case OptimizerType::MOMENTUM_BASED_GD:
+			momentumGD();
+			break;
+		case OptimizerType::STOCHASTIC_GD:
+			stochasticGD();
+			break;
+		default:
+			printf("\nINVALID\n");
+		}
+	}
+
+	void test(std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> _dataset) {
+		h_data = _dataset.first;
+		h_labels = _dataset.second;
+
+		int accuracyCount = 0;
+		double accuracy = 0.0;
+		double loss = 0.0;
+
+		for (int i = 0; i < h_data.size(); i++) {
+
+			//Copy data to Layer 0
+			thrust::copy(h_data[i].begin(), h_data[i].end(), layers[0].H.begin());
+
+			forwardProp();
+
+			unsigned L = layers.size() - 1;
+			thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
+			unsigned position = iter - layers[L].H.begin();
+			if (position == h_labels[i]) {
+				accuracyCount += 1;
+			}
+			accuracy = (double)accuracyCount / (double)(i + 1);
+			std::cout << "Accuracy: " << accuracy * 100 << " %" << "\r";
+		}
 	}
 
 	void matMul(thrust::device_vector<double> A, thrust::device_vector<double> B, thrust::device_vector<double> &C,
@@ -621,7 +694,8 @@ public:
 		}
 	}
 
-	void sgd() {
+	void stochasticGD() {
+
 		int accuracyCount = 0;
 		double accuracy = 0.0;
 		double loss = 0.0;
@@ -645,57 +719,228 @@ public:
 			temp_dW.push_back(temp_dWi);
 		}
 
-		for (int i = 0; i < h_data.size(); i++) {
+		for (int ep = 0; ep < epochs; ep++) {
 
-			//Copy data to Layer 0
-			thrust::copy(h_data[i].begin(), h_data[i].end(), layers[0].H.begin());
+			std::cout << std::endl << "Epoch: " << ep + 1 << std::endl;
+			accuracyCount = 0;
 
-			forwardProp();
+			for (int i = 0; i < h_data.size(); i++) {
 
-			unsigned L = layers.size() - 1;
-			thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
-			unsigned position = iter - layers[L].H.begin();
-			if (position == h_labels[i]) {
-				accuracyCount += 1;
+				//Copy data to Layer 0
+				thrust::copy(h_data[i].begin(), h_data[i].end(), layers[0].H.begin());
+
+				forwardProp();
+
+				unsigned L = layers.size() - 1;
+				thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
+				unsigned position = iter - layers[L].H.begin();
+				if (position == h_labels[i]) {
+					accuracyCount += 1;
+				}
+
+				backProp(h_labels[i]);
+
+				//Accumulate
+				for (int j = 1; j < layers.size(); j++) {
+					thrust::transform(dW[j].data.begin(), dW[j].data.end(), temp_dW[j].data.begin(), temp_dW[j].data.begin(), thrust::plus<double>());
+					thrust::transform(dB[j].begin(), dB[j].end(), temp_dB[j].begin(), temp_dB[j].begin(), thrust::plus<double>());
+				}
+
+				if ((i + 1) % batchSize == 0 || i == (h_data.size() - 1)) {
+
+					accuracy = (double)accuracyCount / (double)(i + 1);
+					std::cout << "Accuracy: " << accuracy * 100 << " %" << "\r";
+
+					//Update Weights
+					for (int j = 1; j < layers.size(); j++) {
+						thrust::transform(W[j].data.begin(), W[j].data.end(), temp_dW[j].data.begin(), W[j].data.begin(), UpdateGrad(learningRate));
+						thrust::transform(B[j].begin(), B[j].end(), temp_dB[j].begin(), B[j].begin(), UpdateGrad(learningRate));
+					}
+
+					fillZeros(temp_dW, temp_dB);
+				}
+
+
+				if (SHOW_DEBUG_LOGS) {
+					for (int j = 1; j < layers.size(); j++) {
+						std::cout << "W " << j << std::endl;
+						thrust::copy(W[j].data.begin(), W[j].data.end(), std::ostream_iterator<double>(std::cout, " "));
+						std::cout << std::endl << "B " << j << std::endl;
+						thrust::copy(B[j].begin(), B[j].end(), std::ostream_iterator<double>(std::cout, " "));
+					}
+					for (int j = 1; j < layers.size(); j++) {
+						std::cout << "dW " << j << std::endl;
+						thrust::copy(dW[j].data.begin(), dW[j].data.end(), std::ostream_iterator<double>(std::cout, " "));
+						std::cout << std::endl << "dB " << j << std::endl;
+						thrust::copy(dB[j].begin(), dB[j].end(), std::ostream_iterator<double>(std::cout, " "));
+					}
+				}
+			}
+		}
+	}
+
+	void batchGD() {
+
+		int accuracyCount = 0;
+		double accuracy = 0.0;
+		double loss = 0.0;
+
+		std::vector<Matrix> temp_dW;
+		std::vector<thrust::device_vector<double>> temp_dB;
+
+		//Dummy 0th layer - Input layer
+		temp_dB.push_back(thrust::device_vector<double>());
+		temp_dW.push_back(Matrix(0, 0));
+
+		//Initialize
+		for (int j = 1; j < layers.size(); j++) {
+			thrust::device_vector<double> temp_dBi(layers.at(j).size);
+			Matrix temp_dWi = Matrix(layers.at(j).size, layers.at(j - 1).size);
+
+			thrust::fill(temp_dBi.begin(), temp_dBi.end(), 0.0);
+			thrust::fill(temp_dWi.data.begin(), temp_dWi.data.end(), 0.0);
+
+			temp_dB.push_back(temp_dBi);
+			temp_dW.push_back(temp_dWi);
+		}
+
+		for (int ep = 0; ep < epochs; ep++) {
+
+			std::cout << std::endl << "Epoch: " << ep + 1 << std::endl;
+			accuracyCount = 0;
+			int i = 0;
+
+			for (i = 0; i < h_data.size(); i++) {
+
+				std::cout << "processed: " << i+1 << "\r";
+
+				//Copy data to Layer 0
+				thrust::copy(h_data[i].begin(), h_data[i].end(), layers[0].H.begin());
+
+				forwardProp();
+
+				unsigned L = layers.size() - 1;
+				thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
+				unsigned position = iter - layers[L].H.begin();
+				if (position == h_labels[i]) {
+					accuracyCount += 1;
+				}
+
+				backProp(h_labels[i]);
+
+				//Accumulate
+				for (int j = 1; j < layers.size(); j++) {
+					thrust::transform(dW[j].data.begin(), dW[j].data.end(), temp_dW[j].data.begin(), temp_dW[j].data.begin(), thrust::plus<double>());
+					thrust::transform(dB[j].begin(), dB[j].end(), temp_dB[j].begin(), temp_dB[j].begin(), thrust::plus<double>());
+				}
 			}
 
-			backProp(h_labels[i]);
+			accuracy = (double)accuracyCount / (double)(i + 1);
+			std::cout << std::endl << "Accuracy: " << accuracy * 100 << " %" << "\r";
 
-			//Accumulate
+			//Update Weights
 			for (int j = 1; j < layers.size(); j++) {
-				thrust::transform(dW[j].data.begin(), dW[j].data.end(), temp_dW[j].data.begin(), temp_dW[j].data.begin(), thrust::plus<double>());
-				thrust::transform(dB[j].begin(), dB[j].end(), temp_dB[j].begin(), temp_dB[j].begin(), thrust::plus<double>());
+				thrust::transform(W[j].data.begin(), W[j].data.end(), temp_dW[j].data.begin(), W[j].data.begin(), UpdateGrad(learningRate));
+				thrust::transform(B[j].begin(), B[j].end(), temp_dB[j].begin(), B[j].begin(), UpdateGrad(learningRate));
 			}
 
-			if ((i + 1) % batchSize == 0 || i == (h_data.size()-1)) {
+			fillZeros(temp_dW, temp_dB);
+		}
+	}
 
-				accuracy = (double)accuracyCount / (double)(i + 1);
-				std::cout << "Accuracy: " << accuracy*100 << " %" << "\r";
 
-				//Update Weights
-				for (int j = 1; j < layers.size(); j++) {
-					thrust::transform(W[j].data.begin(), W[j].data.end(), temp_dW[j].data.begin(), W[j].data.begin(), UpdateGrad(learningRate));
-					thrust::transform(B[j].begin(), B[j].end(), temp_dB[j].begin(), B[j].begin(), UpdateGrad(learningRate));
+	void momentumGD() {
+
+		int accuracyCount = 0;
+		double accuracy = 0.0;
+		double loss = 0.0;
+		double gamma = 0.9;
+
+		std::vector<Matrix> temp_dW;
+		std::vector<thrust::device_vector<double>> temp_dB;
+
+		std::vector<Matrix> priv_dW;
+		std::vector<thrust::device_vector<double>> priv_dB;
+
+		//Dummy 0th layer - Input layer
+		temp_dB.push_back(thrust::device_vector<double>());
+		temp_dW.push_back(Matrix(0, 0));
+
+		priv_dB.push_back(thrust::device_vector<double>());
+		priv_dW.push_back(Matrix(0, 0));
+
+		//Initialize
+		for (int j = 1; j < layers.size(); j++) {
+			thrust::device_vector<double> temp_dBi(layers.at(j).size);
+			Matrix temp_dWi = Matrix(layers.at(j).size, layers.at(j - 1).size);
+
+			thrust::device_vector<double> temp_priv_dBi(layers.at(j).size);
+			Matrix temp_priv_dWi = Matrix(layers.at(j).size, layers.at(j - 1).size);
+
+
+			thrust::fill(temp_dBi.begin(), temp_dBi.end(), 0.0);
+			thrust::fill(temp_dWi.data.begin(), temp_dWi.data.end(), 0.0);
+
+			thrust::fill(temp_priv_dBi.begin(), temp_priv_dBi.end(), 0.0);
+			thrust::fill(temp_priv_dWi.data.begin(), temp_priv_dWi.data.end(), 0.0);
+
+			temp_dB.push_back(temp_dBi);
+			temp_dW.push_back(temp_dWi);
+
+			priv_dB.push_back(temp_priv_dBi);
+			priv_dW.push_back(temp_priv_dWi);
+		}
+
+		for (int ep = 0; ep < epochs; ep++) {
+
+			std::cout << std::endl << "Epoch: " << ep + 1 << std::endl;
+			accuracyCount = 0;
+			int i = 0;
+
+			for (i = 0; i < h_data.size(); i++) {
+
+				std::cout << "processed: " << i + 1 << "\r";
+
+				//Copy data to Layer 0
+				thrust::copy(h_data[i].begin(), h_data[i].end(), layers[0].H.begin());
+
+				forwardProp();
+
+				unsigned L = layers.size() - 1;
+				thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
+				unsigned position = iter - layers[L].H.begin();
+				if (position == h_labels[i]) {
+					accuracyCount += 1;
 				}
 
-				fillZeros(temp_dW, temp_dB);
+				backProp(h_labels[i]);
+
+				//Accumulate
+				for (int j = 1; j < layers.size(); j++) {
+					thrust::transform(dW[j].data.begin(), dW[j].data.end(), temp_dW[j].data.begin(), temp_dW[j].data.begin(), thrust::plus<double>());
+					thrust::transform(dB[j].begin(), dB[j].end(), temp_dB[j].begin(), temp_dB[j].begin(), thrust::plus<double>());
+				}
 			}
 
+			accuracy = (double)accuracyCount / (double)(i + 1);
+			std::cout << std::endl << "Accuracy: " << accuracy * 100 << " %" << "\r";
 
-			if (SHOW_DEBUG_LOGS) {
-				for (int j = 1; j < layers.size(); j++) {
-					std::cout << "W " << j << std::endl;
-					thrust::copy(W[j].data.begin(), W[j].data.end(), std::ostream_iterator<double>(std::cout, " "));
-					std::cout << std::endl << "B " << j << std::endl;
-					thrust::copy(B[j].begin(), B[j].end(), std::ostream_iterator<double>(std::cout, " "));
-				}
-				for (int j = 1; j < layers.size(); j++) {
-					std::cout << "dW " << j << std::endl;
-					thrust::copy(dW[j].data.begin(), dW[j].data.end(), std::ostream_iterator<double>(std::cout, " "));
-					std::cout << std::endl << "dB " << j << std::endl;
-					thrust::copy(dB[j].begin(), dB[j].end(), std::ostream_iterator<double>(std::cout, " "));
-				}
+			//Update Weights
+			for (int j = 1; j < layers.size(); j++) {
+				thrust::device_vector<double> v_dBi(layers.at(j).size);
+				Matrix v_dWi = Matrix(layers.at(j).size, layers.at(j - 1).size);
+
+				thrust::transform(priv_dB[j].begin(), priv_dB[j].end(), temp_dB[j].begin(), v_dBi.begin(), UpdateMomentumGrad(gamma, learningRate));
+				thrust::transform(priv_dW[j].data.begin(), priv_dW[j].data.end(), temp_dW[j].data.begin(), v_dWi.data.begin(), UpdateMomentumGrad(gamma, learningRate));
+
+				thrust::transform(W[j].data.begin(), W[j].data.end(), v_dWi.data.begin(), W[j].data.begin(), thrust::minus<double>());
+				thrust::transform(B[j].begin(), B[j].end(), v_dBi.begin(), B[j].begin(), thrust::minus<double>());
+
+				thrust::copy(v_dBi.begin(), v_dBi.end(), priv_dB[j].begin());
+				thrust::copy(v_dWi.data.begin(), v_dWi.data.end(), priv_dW[j].data.begin());
 			}
+
+			fillZeros(temp_dW, temp_dB);
 		}
 	}
 };
@@ -711,9 +956,16 @@ std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> r
 	std::string num, temp;
 	thrust::host_vector<int> host_labels;
 
+	int countLines = 0;
+	std::string str = "|||///---\\\\\\|||///---\\\\\\";
+	char loader = str[0];
+
 	while (fin >> temp) {
 
-		std::cout << ".";
+		countLines += 1;
+		if (countLines % 20 == 0)
+			loader =  str[countLines % str.length()];
+		std::cout << "Number of Lines Read: " << countLines << " " << loader << "\r";
 
 		//To break
 		std::stringstream s(temp);
@@ -753,20 +1005,30 @@ int main()
 	
 	thrust::host_vector<int> labels;
 
-	std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> dataset = readDataSet("mnist_test.csv");
+	std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> trainDataset = readDataSet(TRAIN_DATASET_PATH);
 
-	unsigned inputSize = dataset.first[0].size(), hiddenSize = 100, outputSize = 10;
+	unsigned inputSize = trainDataset.first[0].size(), hiddenSize = 100, outputSize = 10;
 
 	Model model;
 
 	model.add(Layer(LayerType::INPUT, inputSize, ActivationType::NONE));
 	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::TANH));
-	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::TANH));
+	model.add(Layer(LayerType::DENSE, 70, ActivationType::TANH));
 	model.add(Layer(LayerType::OUTPUT, outputSize, ActivationType::SOFTMAX));
 
 	model.compile(OptimizerType::BATCH_GD, InitializationType::RANDOM, 0.001);
 
-	model.fit(dataset, 1, 16);
+	model.summary();
+
+	std::cout << std::endl << "Training Model" << std::endl;
+
+	model.fit(trainDataset, 5, 16);
+
+	std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> testDataset = readDataSet(TEST_DATASET_PATH);
+
+	std::cout << std::endl << "Testing Model" << std::endl;
+
+	model.test(testDataset);
 
 	return 0;
 }
