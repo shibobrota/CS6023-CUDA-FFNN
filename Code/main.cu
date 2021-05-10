@@ -1,7 +1,15 @@
-﻿
+﻿/*
+	Name : Shibobrota
+	Roll : CS20M059
+	Description: Cuda Accelerated Feed forward Neural Network.
+
+	Download dataset from: https://github.com/shibobrota/CS6023-CUDA-FFNN
+*/
+
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
+#include <cuda.h>
 #include <stdio.h>
 #include <vector>
 #include <string>
@@ -19,12 +27,10 @@
 #include <thrust/random.h>
 #include <thrust/extrema.h>
 
-__managed__
-static bool SHOW_DEBUG_LOGS = false;
+__managed__ static bool SHOW_DEBUG_LOGS = false;
 
 std::string TEST_DATASET_PATH = "mnist_test.csv";
 std::string TRAIN_DATASET_PATH = "mnist_train.csv";
-
 
 enum LayerType
 {
@@ -60,9 +66,9 @@ struct UpdateMomentumGrad
 {
 	double lr, gamma;
 
-	UpdateMomentumGrad(double _gamma, double _lr) : lr(_lr), gamma(_gamma) {};
+	UpdateMomentumGrad(double _gamma, double _lr) : lr(_lr), gamma(_gamma){};
 
-	__host__ __device__ double operator()(const double& A, const double& B)
+	__host__ __device__ double operator()(const double &A, const double &B)
 	{
 		return ((gamma * A) + (lr * B));
 	}
@@ -72,9 +78,9 @@ struct UpdateGrad
 {
 	double lr;
 
-	UpdateGrad(double _lr) : lr(_lr) {};
+	UpdateGrad(double _lr) : lr(_lr){};
 
-	__host__ __device__ double operator()(const double& A, const double& B)
+	__host__ __device__ double operator()(const double &A, const double &B)
 	{
 		return (A - (lr * B));
 	}
@@ -101,7 +107,8 @@ struct matrixMult
 		for (unsigned k = 0; k < n; k++)
 		{
 			sum += A[i * n + k] * B[k * r + j];
-			if (SHOW_DEBUG_LOGS) {
+			if (SHOW_DEBUG_LOGS)
+			{
 				printf("A[i * n + k = %d]: %f | B[k * r + j = %d]: %f\n", i * n + k, A[i * n + k], k * r + j, B[k * r + j]);
 			}
 		}
@@ -371,7 +378,8 @@ public:
 
 		std::string optType = "";
 
-		switch (optimizerType) {
+		switch (optimizerType)
+		{
 		case OptimizerType::BATCH_GD:
 			optType = "BATCH GRADIENT DESCENT";
 			break;
@@ -427,12 +435,13 @@ public:
 			dW.push_back(temp_dWi);
 			W.push_back(tempWi);
 
-			if (SHOW_DEBUG_LOGS) {
+			if (SHOW_DEBUG_LOGS)
+			{
 				std::cout << std::endl
-					<< "dW: \n";
+						  << "dW: \n";
 				thrust::copy(temp_dWi.data.begin(), temp_dWi.data.end(), std::ostream_iterator<double>(std::cout, " "));
 				std::cout << std::endl
-					<< "W: \n";
+						  << "W: \n";
 				thrust::copy(tempWi.data.begin(), tempWi.data.end(), std::ostream_iterator<double>(std::cout, " "));
 				std::cout << "\n";
 			}
@@ -466,12 +475,13 @@ public:
 			B.push_back(tempBi);
 			dB.push_back(temp_dBi);
 
-			if (SHOW_DEBUG_LOGS) {
+			if (SHOW_DEBUG_LOGS)
+			{
 				std::cout << std::endl
-					<< "dB: \n";
+						  << "dB: \n";
 				thrust::copy(temp_dBi.begin(), temp_dBi.end(), std::ostream_iterator<double>(std::cout, " "));
 				std::cout << std::endl
-					<< "W: \n";
+						  << "W: \n";
 				thrust::copy(tempBi.begin(), tempBi.end(), std::ostream_iterator<double>(std::cout, " "));
 				std::cout << "\n";
 			}
@@ -495,7 +505,7 @@ public:
 		initBias();
 	}
 
-	void fit(std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> _dataset, unsigned _epochs, unsigned _batchSize)
+	void fit(std::pair<std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> _dataset, unsigned _epochs, unsigned _batchSize)
 	{
 		h_data = _dataset.first;
 		h_labels = _dataset.second;
@@ -518,7 +528,8 @@ public:
 		}
 	}
 
-	void test(std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> _dataset) {
+	void test(std::pair<std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> _dataset)
+	{
 		h_data = _dataset.first;
 		h_labels = _dataset.second;
 
@@ -527,7 +538,8 @@ public:
 		double lossSum = 0.0;
 		double loss = 0.0;
 
-		for (int i = 0; i < h_data.size(); i++) {
+		for (int i = 0; i < h_data.size(); i++)
+		{
 
 			//Copy data to Layer 0
 			thrust::copy(h_data[i].begin(), h_data[i].end(), layers[0].H.begin());
@@ -538,13 +550,15 @@ public:
 			thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
 			unsigned position = iter - layers[L].H.begin();
 			lossSum += *iter;
-			double lossAvg = lossSum / (i+1);
+			double lossAvg = lossSum / (i + 1);
 			loss = -log(lossAvg);
-			if (position == h_labels[i]) {
+			if (position == h_labels[i])
+			{
 				accuracyCount += 1;
 			}
 			accuracy = (double)accuracyCount / (double)(i + 1);
-			std::cout << "Accuracy: " << accuracy * 100 << " %" << " Loss: " << loss << "\r";
+			std::cout << "Accuracy: " << accuracy * 100 << " %"
+					  << " Loss: " << loss << "\r";
 		}
 	}
 
@@ -572,12 +586,13 @@ public:
 			thrust::transform(res.begin(), res.end(), B[i].begin(), layers[i].A.begin(), thrust::plus<double>());
 			layers[i].applyActivation();
 
-			if (SHOW_DEBUG_LOGS) {
+			if (SHOW_DEBUG_LOGS)
+			{
 				std::cout << std::endl
-					<< "Pre Activation layer " << i << std::endl;
+						  << "Pre Activation layer " << i << std::endl;
 				thrust::copy(layers[i].A.begin(), layers[i].A.end(), std::ostream_iterator<double>(std::cout, " "));
 				std::cout << std::endl
-					<< "Activation layer " << i << std::endl;
+						  << "Activation layer " << i << std::endl;
 				thrust::copy(layers[i].H.begin(), layers[i].H.end(), std::ostream_iterator<double>(std::cout, " "));
 				std::cout << std::endl;
 			}
@@ -595,22 +610,25 @@ public:
 		dA.push_back(thrust::device_vector<double>());
 		dH.push_back(thrust::device_vector<double>());
 
-		for (int i = 1; i < layers.size(); i++) {
+		for (int i = 1; i < layers.size(); i++)
+		{
 			dA.push_back(thrust::device_vector<double>(layers[i].size));
-			if (i == L) {
+			if (i == L)
+			{
 				dH.push_back(thrust::device_vector<double>());
 			}
-			else {
+			else
+			{
 				dH.push_back(thrust::device_vector<double>(layers[i].size));
 			}
 		}
 
-
-		if (SHOW_DEBUG_LOGS) {
+		if (SHOW_DEBUG_LOGS)
+		{
 			std::cout << "\nLayer L" << std::endl;
 			thrust::copy(layers[L].H.begin(), layers[L].H.end(), std::ostream_iterator<double>(std::cout, " "));
 			std::cout << std::endl
-				<< "Pos: " << position << std::endl;
+					  << "Pos: " << position << std::endl;
 		}
 
 		Y = thrust::device_vector<double>(layers[L].size);
@@ -618,26 +636,27 @@ public:
 		thrust::fill(Y.begin(), Y.end(), 0.0);
 		Y[position] = 1.0;
 
-
 		thrust::transform(layers[L].H.begin(), layers[L].H.end(), Y.begin(), dA[L].begin(), thrust::minus<double>());
 
-		if (SHOW_DEBUG_LOGS) {
+		if (SHOW_DEBUG_LOGS)
+		{
 			std::cout << "\n### BACK PROPAGATION ###\n"
-				<< std::endl
-				<< "Y" << std::endl;
+					  << std::endl
+					  << "Y" << std::endl;
 			thrust::copy(Y.begin(), Y.end(), std::ostream_iterator<double>(std::cout, " "));
 			std::cout << std::endl
-				<< "dA[L]" << std::endl;
+					  << "dA[L]" << std::endl;
 			thrust::copy(dA[L].begin(), dA[L].end(), std::ostream_iterator<double>(std::cout, " "));
 			std::cout << std::endl;
 		}
 
 		for (int i = L; i >= 1; i--)
 		{
-			if (SHOW_DEBUG_LOGS) {
+			if (SHOW_DEBUG_LOGS)
+			{
 				//==========================================================================================
 				std::cout << std::endl
-					<< "dA[" << i << "]: " << std::endl;
+						  << "dA[" << i << "]: " << std::endl;
 				thrust::copy(dA[i].begin(), dA[i].end(), std::ostream_iterator<double>(std::cout, " "));
 				std::cout << std::endl;
 				std::cout << "layers[" << i - 1 << "].H: " << std::endl;
@@ -646,15 +665,14 @@ public:
 				//==========================================================================================
 			}
 
-
 			matMul(dA[i], layers[i - 1].H, dW[i].data, dA[i].size(), 1, layers[i - 1].H.size());
 			thrust::copy(dA[i].begin(), dA[i].end(), dB[i].begin());
 
-
-			if (SHOW_DEBUG_LOGS) {
+			if (SHOW_DEBUG_LOGS)
+			{
 				//==========================================================================================
 				std::cout << std::endl
-					<< "dW: " << i << std::endl;
+						  << "dW: " << i << std::endl;
 				thrust::copy(dW[i].data.begin(), dW[i].data.end(), std::ostream_iterator<double>(std::cout, " "));
 				std::cout << std::endl;
 				std::cout << "dB: " << i << std::endl;
@@ -670,19 +688,20 @@ public:
 				thrust::device_vector<double> WiTranspose(W[i].data.size());
 
 				matTrans(W[i].data, WiTranspose, W[i].row, W[i].col);
-				matMul(WiTranspose, dA[i], dH[i-1], W[i].col, W[i].row, 1);
+				matMul(WiTranspose, dA[i], dH[i - 1], W[i].col, W[i].row, 1);
 
-				thrust::device_vector<double> gradA(layers[i-1].size);
+				thrust::device_vector<double> gradA(layers[i - 1].size);
 				layers[i - 1].getGradA(gradA);
 
-				thrust::transform(layers[i - 1].H.begin(), layers[i - 1].H.end(), gradA.begin(), dA[i-1].begin(), thrust::multiplies<double>());
+				thrust::transform(layers[i - 1].H.begin(), layers[i - 1].H.end(), gradA.begin(), dA[i - 1].begin(), thrust::multiplies<double>());
 
-				if (SHOW_DEBUG_LOGS) {
+				if (SHOW_DEBUG_LOGS)
+				{
 					std::cout << std::endl
-						<< "Activation layer dH: " << i - 1 << std::endl;
+							  << "Activation layer dH: " << i - 1 << std::endl;
 					thrust::copy(dH[i - 1].begin(), dH[i - 1].end(), std::ostream_iterator<double>(std::cout, " "));
 					std::cout << std::endl
-						<< "Pre Activation layer dA: " << i - 1 << std::endl;
+							  << "Pre Activation layer dA: " << i - 1 << std::endl;
 					thrust::copy(dA[i - 1].begin(), dA[i - 1].end(), std::ostream_iterator<double>(std::cout, " "));
 					std::cout << std::endl;
 				}
@@ -690,15 +709,18 @@ public:
 		}
 	}
 
-	void fillZeros(std::vector<Matrix> &temp_dW, std::vector<thrust::device_vector<double>> &temp_dB) {
+	void fillZeros(std::vector<Matrix> &temp_dW, std::vector<thrust::device_vector<double>> &temp_dB)
+	{
 		//Initialize
-		for (int j = 1; j < layers.size(); j++) {
+		for (int j = 1; j < layers.size(); j++)
+		{
 			thrust::fill(temp_dB[j].begin(), temp_dB[j].end(), 0.0);
 			thrust::fill(temp_dW[j].data.begin(), temp_dW[j].data.end(), 0.0);
 		}
 	}
 
-	void stochasticGD() {
+	void stochasticGD()
+	{
 
 		int accuracyCount = 0;
 		double accuracy = 0.0;
@@ -713,7 +735,8 @@ public:
 		temp_dW.push_back(Matrix(0, 0));
 
 		//Initialize
-		for (int j = 1; j < layers.size(); j++) {
+		for (int j = 1; j < layers.size(); j++)
+		{
 			thrust::device_vector<double> temp_dBi(layers.at(j).size);
 			Matrix temp_dWi = Matrix(layers.at(j).size, layers.at(j - 1).size);
 
@@ -724,13 +747,16 @@ public:
 			temp_dW.push_back(temp_dWi);
 		}
 
-		for (int ep = 0; ep < epochs; ep++) {
+		for (int ep = 0; ep < epochs; ep++)
+		{
 
-			std::cout << std::endl << "Epoch: " << ep + 1 << std::endl;
+			std::cout << std::endl
+					  << "Epoch: " << ep + 1 << std::endl;
 			accuracyCount = 0;
 			lossSum = 0.0;
 
-			for (int i = 0; i < h_data.size(); i++) {
+			for (int i = 0; i < h_data.size(); i++)
+			{
 
 				//Copy data to Layer 0
 				thrust::copy(h_data[i].begin(), h_data[i].end(), layers[0].H.begin());
@@ -741,19 +767,22 @@ public:
 				thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
 				lossSum += *iter;
 				unsigned position = iter - layers[L].H.begin();
-				if (position == h_labels[i]) {
+				if (position == h_labels[i])
+				{
 					accuracyCount += 1;
 				}
 
 				backProp(h_labels[i]);
 
 				//Accumulate
-				for (int j = 1; j < layers.size(); j++) {
+				for (int j = 1; j < layers.size(); j++)
+				{
 					thrust::transform(dW[j].data.begin(), dW[j].data.end(), temp_dW[j].data.begin(), temp_dW[j].data.begin(), thrust::plus<double>());
 					thrust::transform(dB[j].begin(), dB[j].end(), temp_dB[j].begin(), temp_dB[j].begin(), thrust::plus<double>());
 				}
 
-				if ((i + 1) % batchSize == 0 || i == (h_data.size() - 1)) {
+				if ((i + 1) % batchSize == 0 || i == (h_data.size() - 1))
+				{
 
 					accuracy = (double)accuracyCount / (double)(i + 1);
 
@@ -763,10 +792,12 @@ public:
 
 					lossSum = 0.0;
 
-					std::cout << " Accuracy: " << accuracy * 100 << " %" << " Loss: " << loss << "\r";
+					std::cout << " Accuracy: " << accuracy * 100 << " %"
+							  << " Loss: " << loss << "\r";
 
 					//Update Weights
-					for (int j = 1; j < layers.size(); j++) {
+					for (int j = 1; j < layers.size(); j++)
+					{
 						thrust::transform(W[j].data.begin(), W[j].data.end(), temp_dW[j].data.begin(), W[j].data.begin(), UpdateGrad(learningRate));
 						thrust::transform(B[j].begin(), B[j].end(), temp_dB[j].begin(), B[j].begin(), UpdateGrad(learningRate));
 					}
@@ -774,18 +805,22 @@ public:
 					fillZeros(temp_dW, temp_dB);
 				}
 
-
-				if (SHOW_DEBUG_LOGS) {
-					for (int j = 1; j < layers.size(); j++) {
+				if (SHOW_DEBUG_LOGS)
+				{
+					for (int j = 1; j < layers.size(); j++)
+					{
 						std::cout << "W " << j << std::endl;
 						thrust::copy(W[j].data.begin(), W[j].data.end(), std::ostream_iterator<double>(std::cout, " "));
-						std::cout << std::endl << "B " << j << std::endl;
+						std::cout << std::endl
+								  << "B " << j << std::endl;
 						thrust::copy(B[j].begin(), B[j].end(), std::ostream_iterator<double>(std::cout, " "));
 					}
-					for (int j = 1; j < layers.size(); j++) {
+					for (int j = 1; j < layers.size(); j++)
+					{
 						std::cout << "dW " << j << std::endl;
 						thrust::copy(dW[j].data.begin(), dW[j].data.end(), std::ostream_iterator<double>(std::cout, " "));
-						std::cout << std::endl << "dB " << j << std::endl;
+						std::cout << std::endl
+								  << "dB " << j << std::endl;
 						thrust::copy(dB[j].begin(), dB[j].end(), std::ostream_iterator<double>(std::cout, " "));
 					}
 				}
@@ -793,7 +828,8 @@ public:
 		}
 	}
 
-	void batchGD() {
+	void batchGD()
+	{
 
 		int accuracyCount = 0;
 		double accuracy = 0.0;
@@ -808,7 +844,8 @@ public:
 		temp_dW.push_back(Matrix(0, 0));
 
 		//Initialize
-		for (int j = 1; j < layers.size(); j++) {
+		for (int j = 1; j < layers.size(); j++)
+		{
 			thrust::device_vector<double> temp_dBi(layers.at(j).size);
 			Matrix temp_dWi = Matrix(layers.at(j).size, layers.at(j - 1).size);
 
@@ -819,16 +856,19 @@ public:
 			temp_dW.push_back(temp_dWi);
 		}
 
-		for (int ep = 0; ep < epochs; ep++) {
+		for (int ep = 0; ep < epochs; ep++)
+		{
 
-			std::cout << std::endl << "Epoch: " << ep + 1 << std::endl;
+			std::cout << std::endl
+					  << "Epoch: " << ep + 1 << std::endl;
 			accuracyCount = 0;
 			lossSum = 0.0;
 			int i = 0;
 
-			for (i = 0; i < h_data.size(); i++) {
+			for (i = 0; i < h_data.size(); i++)
+			{
 
-				std::cout << "processed: " << i+1 << "\r";
+				std::cout << "processed: " << i + 1 << "\r";
 
 				//Copy data to Layer 0
 				thrust::copy(h_data[i].begin(), h_data[i].end(), layers[0].H.begin());
@@ -839,21 +879,24 @@ public:
 				thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
 				lossSum += *iter;
 				unsigned position = iter - layers[L].H.begin();
-				if (position == h_labels[i]) {
+				if (position == h_labels[i])
+				{
 					accuracyCount += 1;
 				}
 
 				backProp(h_labels[i]);
 
 				//Accumulate
-				for (int j = 1; j < layers.size(); j++) {
+				for (int j = 1; j < layers.size(); j++)
+				{
 					thrust::transform(dW[j].data.begin(), dW[j].data.end(), temp_dW[j].data.begin(), temp_dW[j].data.begin(), thrust::plus<double>());
 					thrust::transform(dB[j].begin(), dB[j].end(), temp_dB[j].begin(), temp_dB[j].begin(), thrust::plus<double>());
 				}
 			}
 
 			accuracy = (double)accuracyCount / (double)(i + 1);
-			std::cout << std::endl << " Accuracy: " << accuracy * 100 << " %";
+			std::cout << std::endl
+					  << " Accuracy: " << accuracy * 100 << " %";
 
 			double lossAvg = lossSum / (double)(i + 1);
 
@@ -862,7 +905,8 @@ public:
 			std::cout << " Loss: " << loss;
 
 			//Update Weights
-			for (int j = 1; j < layers.size(); j++) {
+			for (int j = 1; j < layers.size(); j++)
+			{
 				thrust::transform(W[j].data.begin(), W[j].data.end(), temp_dW[j].data.begin(), W[j].data.begin(), UpdateGrad(learningRate));
 				thrust::transform(B[j].begin(), B[j].end(), temp_dB[j].begin(), B[j].begin(), UpdateGrad(learningRate));
 			}
@@ -871,13 +915,13 @@ public:
 		}
 	}
 
-
-	void momentumGD() {
+	void momentumGD()
+	{
 
 		int accuracyCount = 0;
 		double accuracy = 0.0;
 		double lossSum = 0.0;
-		double loss = 0.0;		
+		double loss = 0.0;
 		double gamma = 0.9;
 
 		std::vector<Matrix> temp_dW;
@@ -894,13 +938,13 @@ public:
 		priv_dW.push_back(Matrix(0, 0));
 
 		//Initialize
-		for (int j = 1; j < layers.size(); j++) {
+		for (int j = 1; j < layers.size(); j++)
+		{
 			thrust::device_vector<double> temp_dBi(layers.at(j).size);
 			Matrix temp_dWi = Matrix(layers.at(j).size, layers.at(j - 1).size);
 
 			thrust::device_vector<double> temp_priv_dBi(layers.at(j).size);
 			Matrix temp_priv_dWi = Matrix(layers.at(j).size, layers.at(j - 1).size);
-
 
 			thrust::fill(temp_dBi.begin(), temp_dBi.end(), 0.0);
 			thrust::fill(temp_dWi.data.begin(), temp_dWi.data.end(), 0.0);
@@ -915,15 +959,17 @@ public:
 			priv_dW.push_back(temp_priv_dWi);
 		}
 
-		for (int ep = 0; ep < epochs; ep++) {
+		for (int ep = 0; ep < epochs; ep++)
+		{
 
-			std::cout << std::endl << "Epoch: " << ep + 1 << std::endl;
+			std::cout << std::endl
+					  << "Epoch: " << ep + 1 << std::endl;
 			accuracyCount = 0;
 			int i = 0;
 			lossSum = 0.0;
 
-
-			for (i = 0; i < h_data.size(); i++) {
+			for (i = 0; i < h_data.size(); i++)
+			{
 
 				std::cout << "processed: " << i + 1 << "\r";
 
@@ -936,21 +982,24 @@ public:
 				thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
 				unsigned position = iter - layers[L].H.begin();
 				lossSum += *iter;
-				if (position == h_labels[i]) {
+				if (position == h_labels[i])
+				{
 					accuracyCount += 1;
 				}
 
 				backProp(h_labels[i]);
 
 				//Accumulate
-				for (int j = 1; j < layers.size(); j++) {
+				for (int j = 1; j < layers.size(); j++)
+				{
 					thrust::transform(dW[j].data.begin(), dW[j].data.end(), temp_dW[j].data.begin(), temp_dW[j].data.begin(), thrust::plus<double>());
 					thrust::transform(dB[j].begin(), dB[j].end(), temp_dB[j].begin(), temp_dB[j].begin(), thrust::plus<double>());
 				}
 			}
 
 			accuracy = (double)accuracyCount / (double)(i + 1);
-			std::cout << std::endl << " Accuracy: " << accuracy * 100 << " %";
+			std::cout << std::endl
+					  << " Accuracy: " << accuracy * 100 << " %";
 
 			double lossAvg = lossSum / (double)(i + 1);
 
@@ -959,7 +1008,8 @@ public:
 			std::cout << " Loss: " << loss;
 
 			//Update Weights
-			for (int j = 1; j < layers.size(); j++) {
+			for (int j = 1; j < layers.size(); j++)
+			{
 				thrust::device_vector<double> v_dBi(layers.at(j).size);
 				Matrix v_dWi = Matrix(layers.at(j).size, layers.at(j - 1).size);
 
@@ -978,9 +1028,10 @@ public:
 	}
 };
 
-std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> readDataSet(std::string path) {
+std::pair<std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> readDataSet(std::string path)
+{
 
-	std::cout << "Reading Dataset: " << path << std::endl;
+	std::cout << "\nReading Dataset: " << path << std::endl;
 
 	std::vector<thrust::host_vector<double>> dataset;
 	std::ifstream fin;
@@ -993,11 +1044,12 @@ std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> r
 	std::string str = "|||///---\\\\\\|||///---\\\\\\";
 	char loader = str[0];
 
-	while (fin >> temp) {
+	while (fin >> temp)
+	{
 
 		countLines += 1;
 		if (countLines % 20 == 0)
-			loader =  str[countLines % str.length()];
+			loader = str[countLines % str.length()];
 		std::cout << "Number of Lines Read: " << countLines << " " << loader << "\r";
 
 		//To break
@@ -1006,17 +1058,21 @@ std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> r
 		thrust::host_vector<double> row;
 		unsigned i = 0;
 		//Read col
-		while (getline(s, num, ',')) {
-			if (i == 0) {
+		while (getline(s, num, ','))
+		{
+			if (i == 0)
+			{
 				host_labels.push_back(std::stoi(num));
 			}
-			else {
-				row.push_back(stod(num)/(double)255);
+			else
+			{
+				row.push_back(stod(num) / (double)255);
 			}
 			i++;
 		}
 
-		if (SHOW_DEBUG_LOGS) {
+		if (SHOW_DEBUG_LOGS)
+		{
 			std::cout << std::endl;
 			thrust::copy(row.begin(), row.end(), std::ostream_iterator<double>(std::cout, " "));
 			std::cout << std::endl;
@@ -1026,19 +1082,20 @@ std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> r
 		dataset.push_back(dvec);
 	}
 
-	std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> ret = std::make_pair(dataset, host_labels);
+	std::pair<std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> ret = std::make_pair(dataset, host_labels);
 
-	std::cout << std::endl << "Dataset read!" << std::endl;
+	std::cout << std::endl
+			  << "Dataset read!" << std::endl;
 
 	return ret;
 }
 
 int main()
 {
-	
+
 	thrust::host_vector<int> labels;
 
-	std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> trainDataset = readDataSet(TEST_DATASET_PATH);
+	std::pair<std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> trainDataset = readDataSet(TRAIN_DATASET_PATH);
 
 	unsigned inputSize = trainDataset.first[0].size(), hiddenSize = 100, outputSize = 10;
 
@@ -1051,17 +1108,21 @@ int main()
 	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::TANH));
 	model.add(Layer(LayerType::OUTPUT, outputSize, ActivationType::SOFTMAX));
 
-	model.compile(OptimizerType::MOMENTUM_BASED_GD, InitializationType::RANDOM, 0.001);
+	model.compile(OptimizerType::STOCHASTIC_GD, InitializationType::RANDOM, 0.001);
 
 	model.summary();
 
-	std::cout << std::endl << "\nTraining Model\n" << std::endl;
+	std::cout << std::endl
+			  << "\nTraining Model\n"
+			  << std::endl;
 
 	model.fit(trainDataset, 3, 16);
 
-	std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> testDataset = readDataSet(TEST_DATASET_PATH);
+	std::pair<std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> testDataset = readDataSet(TEST_DATASET_PATH);
 
-	std::cout << std::endl << "\nTesting Model\n" << std::endl;
+	std::cout << std::endl
+			  << "\nTesting Model\n"
+			  << std::endl;
 
 	model.test(testDataset);
 
