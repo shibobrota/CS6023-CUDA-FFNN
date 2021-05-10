@@ -524,6 +524,7 @@ public:
 
 		int accuracyCount = 0;
 		double accuracy = 0.0;
+		double lossSum = 0.0;
 		double loss = 0.0;
 
 		for (int i = 0; i < h_data.size(); i++) {
@@ -536,11 +537,14 @@ public:
 			unsigned L = layers.size() - 1;
 			thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
 			unsigned position = iter - layers[L].H.begin();
+			lossSum += *iter;
+			double lossAvg = lossSum / (i+1);
+			loss = -log(lossAvg);
 			if (position == h_labels[i]) {
 				accuracyCount += 1;
 			}
 			accuracy = (double)accuracyCount / (double)(i + 1);
-			std::cout << "Accuracy: " << accuracy * 100 << " %" << "\r";
+			std::cout << "Accuracy: " << accuracy * 100 << " %" << " Loss: " << loss << "\r";
 		}
 	}
 
@@ -819,6 +823,7 @@ public:
 
 			std::cout << std::endl << "Epoch: " << ep + 1 << std::endl;
 			accuracyCount = 0;
+			lossSum = 0.0;
 			int i = 0;
 
 			for (i = 0; i < h_data.size(); i++) {
@@ -850,11 +855,11 @@ public:
 			accuracy = (double)accuracyCount / (double)(i + 1);
 			std::cout << std::endl << " Accuracy: " << accuracy * 100 << " %";
 
-			double lossAvg = lossSum / (i + 1);
+			double lossAvg = lossSum / (double)(i + 1);
 
 			loss = -log(lossAvg);
 
-			std::cout << " Loss: " << loss << " %";
+			std::cout << " Loss: " << loss;
 
 			//Update Weights
 			for (int j = 1; j < layers.size(); j++) {
@@ -915,6 +920,8 @@ public:
 			std::cout << std::endl << "Epoch: " << ep + 1 << std::endl;
 			accuracyCount = 0;
 			int i = 0;
+			lossSum = 0.0;
+
 
 			for (i = 0; i < h_data.size(); i++) {
 
@@ -945,11 +952,11 @@ public:
 			accuracy = (double)accuracyCount / (double)(i + 1);
 			std::cout << std::endl << " Accuracy: " << accuracy * 100 << " %";
 
-			double lossAvg = lossSum / (i + 1);
+			double lossAvg = lossSum / (double)(i + 1);
 
-			loss = -log(lossAvg);
+			loss = -(log(lossAvg));
 
-			std::cout << " Loss: " << loss << " %";
+			std::cout << " Loss: " << loss;
 
 			//Update Weights
 			for (int j = 1; j < layers.size(); j++) {
@@ -1033,27 +1040,30 @@ int main()
 
 	std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> trainDataset = readDataSet(TEST_DATASET_PATH);
 
-	unsigned inputSize = trainDataset.first[0].size(), hiddenSize = 50, outputSize = 10;
+	unsigned inputSize = trainDataset.first[0].size(), hiddenSize = 100, outputSize = 10;
 
 	Model model;
 
 	model.add(Layer(LayerType::INPUT, inputSize, ActivationType::NONE));
 	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::TANH));
+	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::TANH));
+	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::TANH));
+	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::TANH));
 	model.add(Layer(LayerType::OUTPUT, outputSize, ActivationType::SOFTMAX));
 
-	model.compile(OptimizerType::STOCHASTIC_GD, InitializationType::RANDOM, 0.001);
+	model.compile(OptimizerType::MOMENTUM_BASED_GD, InitializationType::RANDOM, 0.001);
 
 	model.summary();
 
-	std::cout << std::endl << "Training Model" << std::endl;
+	std::cout << std::endl << "\nTraining Model\n" << std::endl;
 
-	model.fit(trainDataset, 5, 16);
+	model.fit(trainDataset, 3, 16);
 
-	//std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> testDataset = readDataSet(TEST_DATASET_PATH);
+	std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> testDataset = readDataSet(TEST_DATASET_PATH);
 
-	std::cout << std::endl << "Testing Model" << std::endl;
+	std::cout << std::endl << "\nTesting Model\n" << std::endl;
 
-	model.test(trainDataset);
+	model.test(testDataset);
 
 	return 0;
 }
