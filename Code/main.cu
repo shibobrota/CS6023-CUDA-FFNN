@@ -383,7 +383,7 @@ public:
 			break;
 		}
 
-		printf("Optimizer: %s\n", optType);
+		std::cout << "Optimizer: " << optType << std::endl;
 		printf("Learning Rate: %f\n", learningRate);
 		printf("--------------------------------------------------\n");
 	}
@@ -698,6 +698,7 @@ public:
 
 		int accuracyCount = 0;
 		double accuracy = 0.0;
+		double lossSum = 0.0;
 		double loss = 0.0;
 
 		std::vector<Matrix> temp_dW;
@@ -723,6 +724,7 @@ public:
 
 			std::cout << std::endl << "Epoch: " << ep + 1 << std::endl;
 			accuracyCount = 0;
+			lossSum = 0.0;
 
 			for (int i = 0; i < h_data.size(); i++) {
 
@@ -733,6 +735,7 @@ public:
 
 				unsigned L = layers.size() - 1;
 				thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
+				lossSum += *iter;
 				unsigned position = iter - layers[L].H.begin();
 				if (position == h_labels[i]) {
 					accuracyCount += 1;
@@ -749,7 +752,14 @@ public:
 				if ((i + 1) % batchSize == 0 || i == (h_data.size() - 1)) {
 
 					accuracy = (double)accuracyCount / (double)(i + 1);
-					std::cout << "Accuracy: " << accuracy * 100 << " %" << "\r";
+
+					double lossAvg = lossSum / batchSize;
+
+					loss = -(log(lossAvg));
+
+					lossSum = 0.0;
+
+					std::cout << " Accuracy: " << accuracy * 100 << " %" << " Loss: " << loss << "\r";
 
 					//Update Weights
 					for (int j = 1; j < layers.size(); j++) {
@@ -783,6 +793,7 @@ public:
 
 		int accuracyCount = 0;
 		double accuracy = 0.0;
+		double lossSum = 0.0;
 		double loss = 0.0;
 
 		std::vector<Matrix> temp_dW;
@@ -821,6 +832,7 @@ public:
 
 				unsigned L = layers.size() - 1;
 				thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
+				lossSum += *iter;
 				unsigned position = iter - layers[L].H.begin();
 				if (position == h_labels[i]) {
 					accuracyCount += 1;
@@ -836,7 +848,13 @@ public:
 			}
 
 			accuracy = (double)accuracyCount / (double)(i + 1);
-			std::cout << std::endl << "Accuracy: " << accuracy * 100 << " %" << "\r";
+			std::cout << std::endl << " Accuracy: " << accuracy * 100 << " %";
+
+			double lossAvg = lossSum / (i + 1);
+
+			loss = -log(lossAvg);
+
+			std::cout << " Loss: " << loss << " %";
 
 			//Update Weights
 			for (int j = 1; j < layers.size(); j++) {
@@ -853,7 +871,8 @@ public:
 
 		int accuracyCount = 0;
 		double accuracy = 0.0;
-		double loss = 0.0;
+		double lossSum = 0.0;
+		double loss = 0.0;		
 		double gamma = 0.9;
 
 		std::vector<Matrix> temp_dW;
@@ -909,6 +928,7 @@ public:
 				unsigned L = layers.size() - 1;
 				thrust::device_vector<double>::iterator iter = thrust::max_element(layers[L].H.begin(), layers[L].H.end());
 				unsigned position = iter - layers[L].H.begin();
+				lossSum += *iter;
 				if (position == h_labels[i]) {
 					accuracyCount += 1;
 				}
@@ -923,7 +943,13 @@ public:
 			}
 
 			accuracy = (double)accuracyCount / (double)(i + 1);
-			std::cout << std::endl << "Accuracy: " << accuracy * 100 << " %" << "\r";
+			std::cout << std::endl << " Accuracy: " << accuracy * 100 << " %";
+
+			double lossAvg = lossSum / (i + 1);
+
+			loss = -log(lossAvg);
+
+			std::cout << " Loss: " << loss << " %";
 
 			//Update Weights
 			for (int j = 1; j < layers.size(); j++) {
@@ -1005,18 +1031,17 @@ int main()
 	
 	thrust::host_vector<int> labels;
 
-	std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> trainDataset = readDataSet(TRAIN_DATASET_PATH);
+	std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> trainDataset = readDataSet(TEST_DATASET_PATH);
 
-	unsigned inputSize = trainDataset.first[0].size(), hiddenSize = 100, outputSize = 10;
+	unsigned inputSize = trainDataset.first[0].size(), hiddenSize = 50, outputSize = 10;
 
 	Model model;
 
 	model.add(Layer(LayerType::INPUT, inputSize, ActivationType::NONE));
 	model.add(Layer(LayerType::DENSE, hiddenSize, ActivationType::TANH));
-	model.add(Layer(LayerType::DENSE, 70, ActivationType::TANH));
 	model.add(Layer(LayerType::OUTPUT, outputSize, ActivationType::SOFTMAX));
 
-	model.compile(OptimizerType::BATCH_GD, InitializationType::RANDOM, 0.001);
+	model.compile(OptimizerType::STOCHASTIC_GD, InitializationType::RANDOM, 0.001);
 
 	model.summary();
 
@@ -1024,11 +1049,11 @@ int main()
 
 	model.fit(trainDataset, 5, 16);
 
-	std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> testDataset = readDataSet(TEST_DATASET_PATH);
+	//std::pair< std::vector<thrust::host_vector<double>>, thrust::host_vector<int>> testDataset = readDataSet(TEST_DATASET_PATH);
 
 	std::cout << std::endl << "Testing Model" << std::endl;
 
-	model.test(testDataset);
+	model.test(trainDataset);
 
 	return 0;
 }
